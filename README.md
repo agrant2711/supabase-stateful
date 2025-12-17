@@ -16,7 +16,182 @@ npm run supabase:start        # Starts with previous session restored
 npm run supabase:stop         # Saves state, clears auth tokens, stops cleanly
 ```
 
-Next time you start, **everything** is back - your test users, all the data you created, relationships intact. Migrations run first, then your data is restored.
+Next time you start, **everything** is back - your test users, all the data you created, relationships intact.
+
+---
+
+## Setup Guide
+
+### Prerequisites
+
+1. **Supabase CLI** - [Install guide](https://supabase.com/docs/guides/cli)
+2. **Docker** - [Install Docker Desktop](https://docs.docker.com/desktop)
+
+### Step 1: Set Up Local Supabase
+
+Choose your scenario:
+
+<details>
+<summary><b>I have an existing cloud Supabase project</b></summary>
+
+```bash
+# 1. Initialize local Supabase (creates supabase/ folder with config.toml)
+supabase init
+
+# 2. Login to Supabase
+supabase login
+
+# 3. Link to your cloud project
+supabase link --project-ref YOUR_PROJECT_REF
+# Find project ref: Supabase Dashboard → Project Settings → General
+
+# 4. Pull your schema as a baseline migration
+supabase db pull
+# Creates: supabase/migrations/YYYYMMDD_remote_schema.sql
+
+# 5. If you get "migration history does not match" errors:
+supabase migration repair --status applied MIGRATION_TIMESTAMP
+# Use the timestamp shown in the error message
+
+# 6. Verify local and remote are in sync
+supabase migration list
+# Should show matching timestamps in Local and Remote columns
+```
+
+</details>
+
+<details>
+<summary><b>I'm starting a new project</b></summary>
+
+```bash
+# 1. Initialize local Supabase
+supabase init
+
+# 2. Start local Supabase
+supabase start
+
+# 3. Create your schema in Studio (localhost:54323)
+
+# 4. Generate your initial migration
+supabase db diff --file initial_schema
+```
+
+</details>
+
+### Step 2: Initialize supabase-stateful
+
+```bash
+# In your project directory (where supabase/config.toml exists)
+npx supabase-stateful init
+```
+
+This adds npm scripts to your package.json:
+- `npm run supabase:start` - Start and restore saved state
+- `npm run supabase:stop` - Save state and stop
+- `npm run supabase:status` - Show current status
+
+### Step 3: Set Up Local/Production Switching
+
+Copy the files from [templates/supabase/](templates/supabase/) to your project (e.g., `src/utils/supabase/`):
+
+```
+templates/supabase/
+├── config.js      # Environment detection (local vs production)
+├── client.js      # Browser client
+├── server.js      # Server component client
+├── admin.js       # Admin client (bypasses RLS)
+└── middleware.js  # Session handling
+```
+
+Then update your package.json:
+
+```json
+{
+  "scripts": {
+    "dev:local": "NEXT_PUBLIC_SUPABASE_LOCAL=true next dev",
+    "dev": "next dev"
+  }
+}
+```
+
+Now:
+- `npm run dev:local` → Uses local Supabase (localhost:54321)
+- `npm run dev` → Uses cloud Supabase (from .env)
+
+### Step 4: Set Up CI/CD for Migrations
+
+Copy [templates/github-workflow/deploy.yml](templates/github-workflow/deploy.yml) to `.github/workflows/deploy.yml`.
+
+Add these secrets to your GitHub repository:
+
+| Secret | Where to find it |
+|--------|------------------|
+| `SUPABASE_ACCESS_TOKEN` | [Supabase Dashboard](https://supabase.com/dashboard/account/tokens) |
+| `SUPABASE_PROJECT_REF` | Project Settings → General |
+| `SUPABASE_DB_PASSWORD` | Project Settings → Database |
+| `VERCEL_TOKEN` | [Vercel Account Settings](https://vercel.com/account/tokens) (if using Vercel) |
+| `VERCEL_ORG_ID` | `.vercel/project.json` after `vercel link` |
+| `VERCEL_PROJECT_ID` | `.vercel/project.json` after `vercel link` |
+
+Now when you push to main:
+1. Migrations run on production database
+2. App deploys to Vercel
+
+---
+
+## Daily Workflow
+
+### Start your day
+
+```bash
+npm run dev:local    # Starts local Supabase + app, restores your data
+```
+
+### Make schema changes
+
+```bash
+# 1. Make changes in Supabase Studio (localhost:54323)
+
+# 2. Generate a migration
+supabase db diff --file add_user_preferences
+
+# 3. Commit the migration
+git add supabase/migrations
+git commit -m "Add user preferences table"
+git push    # Triggers CI/CD to apply migration to production
+```
+
+### End your day
+
+```bash
+# Ctrl+C or:
+npm run supabase:stop    # Saves your test data for next session
+```
+
+### When a teammate adds migrations
+
+```bash
+git pull                    # Get their migration files
+npm run supabase:start      # Your data is restored, then their migrations run on top
+```
+
+---
+
+## How It Works
+
+**On stop:**
+1. Export entire database state (schema + data for `public` and `auth` schemas)
+2. Clear `auth.refresh_tokens` (prevents duplicate key errors)
+3. Stop Supabase
+
+**On start:**
+1. Start Supabase
+2. Restore saved state (schema + data from your last session)
+3. Apply pending migrations **on top of your data** via `supabase migration up`
+
+The key insight: migrations run ON TOP of your existing data, not on an empty database. When a teammate adds a migration that renames a column, it actually transforms YOUR data.
+
+---
 
 ## Why Not Just Use seed.sql?
 
@@ -28,324 +203,82 @@ Next time you start, **everything** is back - your test users, all the data you 
 | **When it runs** | Every `supabase db reset` | Only when you start/stop |
 | **Contains** | Default categories, settings | Users you created, Stripe test customers, orders you made |
 
-**seed.sql is great for:**
-- Default lookup data (countries, categories, roles)
-- Sample products/content that everyone needs
-- Baseline configuration
-
-**supabase-stateful is for:**
-- The test user you created with `password123`
-- The Stripe customer you linked to that user
-- The 5 orders you made to test the checkout flow
-- The specific subscription state you need to test upgrades
-
 They work together: `seed.sql` provides the foundation, `supabase-stateful` preserves your work on top of it.
+
+---
 
 ## When to Use This
 
-This tool is most valuable when:
-
 **External Service Integration**
-- Stripe test mode - you need consistent test customers, subscriptions, payment methods across sessions
-- Email services (Resend, SendGrid) - test users with specific email states
-- Webhook testing - need predictable user/order states to test different scenarios
+- Stripe test mode - consistent test customers, subscriptions across sessions
+- Email services - test users with specific email states
+- Webhook testing - predictable user/order states
 
 **Complex Test Data**
-- E-commerce: products linked to Stripe, carts, orders, fulfillment states
-- SaaS: users with different subscription tiers, feature flags, usage limits
-- Marketplaces: multiple user types (buyers, sellers), listings, transactions
+- E-commerce: products linked to Stripe, carts, orders
+- SaaS: users with different subscription tiers
 - Data with foreign key relationships that's tedious to recreate
-
-**Auth & Permissions Testing**
-- Test users with specific roles (admin, user, moderator)
-- Users at different onboarding stages
-- OAuth connections, subscription states, verification statuses
 
 **Team Development**
 - Each developer has isolated test data
 - No more "who deleted my test account?"
 - Demo data stays consistent for stakeholder reviews
 
-**When you probably don't need this:**
-- Simple apps with auto-generated test data
-- Projects that only need the baseline seed.sql data
-- Already using Docker volumes to persist Supabase data (but watch out for auth token conflicts!)
-
-## Prerequisites
-
-This tool works with existing Supabase projects. You need:
-
-1. **Supabase CLI** installed ([install guide](https://supabase.com/docs/guides/cli))
-2. **Docker** running (required for local Supabase)
-3. **A Supabase project** set up locally (see below)
-
-### First-Time Setup
-
-If you have an existing cloud Supabase project and want to set up local development:
-
-```bash
-# 1. Initialize Supabase in your project (creates supabase/ folder)
-supabase init
-
-# 2. Login to Supabase
-supabase login
-
-# 3. Link to your cloud project
-supabase link --project-ref YOUR_PROJECT_REF
-# Find your project ref in: Supabase Dashboard → Project Settings → General
-
-# 4. Pull the remote schema as your baseline migration
-supabase db pull
-# This creates supabase/migrations/YYYYMMDD_remote_schema.sql
-
-# 5. Start local Supabase to verify it works
-supabase start
-```
-
-If you're starting a **new project** (no cloud database yet):
-
-```bash
-supabase init
-supabase start
-# Create your schema in Studio (localhost:54323), then:
-supabase db diff --file initial_schema
-```
-
-## Quick Start
-
-```bash
-# In your Supabase project directory (where supabase/config.toml exists)
-npx supabase-stateful init
-
-# This adds npm scripts to your package.json:
-npm run supabase:start   # Start with state restoration
-npm run supabase:stop    # Save state and stop
-npm run supabase:status  # Show current status
-```
-
-## How It Works
-
-**On stop:**
-1. Export entire database state (schema + data for `public` and `auth` schemas)
-2. Add `ON CONFLICT DO NOTHING` to all inserts for safe restoration
-3. Clear `auth.refresh_tokens` (prevents duplicate key errors)
-4. Stop Supabase
-
-**On start:**
-1. Start Supabase
-2. Restore saved state (schema + data from your last session)
-3. Apply pending migrations **on top of your data** via `supabase migration up`
-
-The key insight: migrations run ON TOP of your existing data, not on an empty database. When a teammate adds a migration that renames a column, it actually transforms YOUR data.
-
-## What Gets Saved
-
-**Everything you create during development:**
-- Auth users (your test accounts)
-- All public schema tables (products, orders, profiles, whatever your app uses)
-- Foreign key relationships stay intact
-- JSONB columns, arrays, all data types
-
-**What's excluded:**
-- System tables (`supabase_%`, `schema_migrations`, etc.)
-- Auth refresh tokens (cleared to prevent conflicts)
+---
 
 ## Commands
 
 | Command | Description |
 |---------|-------------|
-| `init` | Initialize in your project (requires `supabase/config.toml`) |
-| `start` | Start Supabase, apply migrations, restore state |
-| `stop` | Save state, clear auth tokens, stop Supabase |
+| `init` | Initialize in your project |
+| `start` | Start Supabase, restore state, apply migrations |
+| `stop` | Save state, clear auth tokens, stop |
 | `status` | Show running status and state info |
 | `export` | Export cloud data to seed file |
 | `sync` | Export cloud data and apply to local |
 
-## Recommended Development Workflow
-
-### Setup: Combined Dev Script
-
-Create a single command that starts everything with graceful shutdown:
-
-```json
-// package.json
-{
-  "scripts": {
-    "dev:local": "concurrently \"npm run supabase:start\" \"npm run dev\"",
-    "dev:production": "npm run dev"
-  }
-}
-```
-
-For graceful state saving on Ctrl+C, create a wrapper script:
-
-```bash
-#!/bin/bash
-# scripts/dev-local.sh
-
-cleanup() {
-  echo "Shutting down..."
-  npm run supabase:stop
-  exit 0
-}
-trap cleanup SIGINT SIGTERM
-
-npx concurrently \
-  "npm run supabase:start" \
-  "npm run dev" \
-  "ngrok http 3000"  # optional: for webhooks
-
-wait
-```
-
-Then: `npm run dev:local` starts everything, Ctrl+C saves state and stops cleanly.
-
-### Daily Development
-
-```bash
-# Option 1: Combined script (recommended)
-npm run dev:local         # Starts Supabase + app, restores previous session
-# ... develop, create test users, add data ...
-# Ctrl+C                  # Saves state, stops everything
-
-# Option 2: Separate commands
-npm run supabase:start    # Start Supabase, restore state
-npm run dev               # Start your app
-# ... develop ...
-npm run supabase:stop     # Save state and stop
-```
-
-### Making Database Changes
-
-**1. Develop locally:**
-```bash
-# Make changes in Supabase Studio (localhost:54323)
-# Or edit SQL files directly
-```
-
-**2. Generate migration:**
-```bash
-supabase db diff --file add_user_preferences
-# Creates: supabase/migrations/YYYYMMDD_add_user_preferences.sql
-```
-
-**3. Test locally:**
-```bash
-npm run supabase:stop     # Save current state
-npm run supabase:start    # Re-applies migrations + restores data
-# Verify your changes work with existing data
-```
-
-**4. Commit and deploy:**
-```bash
-git add supabase/migrations
-git commit -m "Add user preferences table"
-git push                   # Triggers CI/CD
-```
-
-### CI/CD: Auto-Deploy Migrations
-
-See [templates/github-workflow/deploy.yml](templates/github-workflow/deploy.yml) for a complete workflow that:
-1. Runs database migrations on push to main
-2. Deploys to Vercel (optional)
-
-Copy it to `.github/workflows/deploy.yml` in your project.
-
-### Local vs Production Development
-
-To switch between local and production Supabase, use environment-aware client configuration.
-
-See [templates/supabase/](templates/supabase/) for a complete Next.js setup that automatically switches based on `NEXT_PUBLIC_SUPABASE_LOCAL`.
-
-**Quick setup:**
-
-```json
-// package.json
-{
-  "scripts": {
-    "dev:local": "NEXT_PUBLIC_SUPABASE_LOCAL=true npm run dev",
-    "dev": "npm run dev"
-  }
-}
-```
-
-- `npm run dev:local` → Uses local Supabase (localhost:54321)
-- `npm run dev` → Uses cloud Supabase (from env vars)
-
-### Team Workflow
-
-**When you pull changes:**
-```bash
-git pull                    # Get new migration files
-npm run supabase:start      # Auto-applies new migrations, restores your data
-```
-
-**Key points:**
-- Migrations are committed to git
-- Local state files are gitignored (each dev has their own test data)
-- Production migrations deploy via CI/CD
-- Everyone's local data survives schema changes
+---
 
 ## Cloud Sync (Optional)
 
-Pull data from your production/staging Supabase to seed local development:
+Pull data from production to seed local development:
 
 ```bash
-# Set environment variables
 export SUPABASE_URL=https://xxx.supabase.co
 export SUPABASE_SERVICE_ROLE_KEY=eyJ...
 
-# Export cloud data
-npx supabase-stateful export --sample
-
-# Or sync directly to local
 npx supabase-stateful sync --sample
 ```
 
-**Options:**
+Options:
 - `--sample` - Limit to 100 rows per table
-- `--tables coaches,products` - Export specific tables
-- `--output path/to/file.sql` - Custom output path
+- `--tables users,products` - Export specific tables
 
-## Configuration
+---
 
-After `init`, a `.supabase-stateful.json` file is created:
+## Troubleshooting
 
-```json
-{
-  "stateFile": "supabase/local-state.sql",
-  "containerName": "supabase_db_myproject"
-}
-```
+**"migration history does not match"**
 
-The state file is automatically added to `.gitignore`.
-
-## FAQ
-
-**Why not just use `seed.sql`?**
-
-`seed.sql` runs on every reset and contains static data. This tool preserves your *session* state - all the data you created during development, including test users, sample records, everything.
-
-**Does this work with migrations?**
-
-Yes! Your state is restored first, then migrations run ON TOP of your data. This means if a teammate adds a migration that renames a column, it actually transforms your data (not an empty database).
-
-**What about auth token conflicts?**
-
-The `stop` command clears `auth.refresh_tokens` before saving. This prevents the "duplicate key" errors that happen when stale tokens conflict on restart.
-
-**Can I share state with my team?**
-
-The state file is gitignored by default (it may contain sensitive data). For team seeding, use the `export`/`sync` commands to pull from a shared cloud instance.
-
-**A teammate added migrations, how do I get them?**
-
+Your remote database has migration records that don't match local files. Fix with:
 ```bash
-git pull                    # Get the new migration files
-npm run supabase:start      # Your data is restored, then migrations run on top
+supabase migration repair --status applied TIMESTAMP
+# or
+supabase migration repair --status reverted TIMESTAMP
 ```
 
-The migrations transform your existing data - e.g., a `RENAME COLUMN` migration will actually rename the column in your saved data.
+**"Cannot find supabase/config.toml"**
+
+Run `supabase init` first to create the local Supabase config.
+
+**Docker errors**
+
+Make sure Docker Desktop is running:
+```bash
+docker ps    # Should show output, not an error
+```
+
+---
 
 ## License
 
