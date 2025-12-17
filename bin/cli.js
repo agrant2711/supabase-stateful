@@ -1,0 +1,51 @@
+#!/usr/bin/env node
+
+import { program } from 'commander';
+import { init } from '../src/commands/init.js';
+import { start } from '../src/commands/start.js';
+import { stop } from '../src/commands/stop.js';
+import { status } from '../src/commands/status.js';
+import { sync } from '../src/commands/sync.js';
+import { exportData } from '../src/commands/export.js';
+
+program
+  .name('supabase-stateful')
+  .description('Persistent local state for Supabase development')
+  .version('0.1.0');
+
+program
+  .command('init')
+  .description('Initialize supabase-stateful in your project')
+  .action(init);
+
+program
+  .command('start')
+  .description('Start Supabase and restore saved state')
+  .action(start);
+
+program
+  .command('stop')
+  .description('Save state, clear auth tokens, and stop Supabase')
+  .action(stop);
+
+program
+  .command('status')
+  .description('Show current status')
+  .action(status);
+
+program
+  .command('sync')
+  .description('Sync cloud data to local database')
+  .option('--sample', 'Limit to 100 rows per table')
+  .option('--tables <tables>', 'Comma-separated list of tables')
+  .action(sync);
+
+program
+  .command('export')
+  .description('Export cloud data to seed file')
+  .option('--sample', 'Limit to 100 rows per table')
+  .option('--tables <tables>', 'Comma-separated list of tables')
+  .option('--output <path>', 'Output file path')
+  .action(exportData);
+
+program.parse();
