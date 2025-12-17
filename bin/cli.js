@@ -2,6 +2,7 @@
 
 import { program } from 'commander';
 import { init } from '../src/commands/init.js';
+import { setup } from '../src/commands/setup.js';
 import { start } from '../src/commands/start.js';
 import { stop } from '../src/commands/stop.js';
 import { status } from '../src/commands/status.js';
@@ -15,8 +16,14 @@ program
 
 program
   .command('init')
-  .description('Initialize supabase-stateful in your project')
+  .description('Initialize supabase-stateful (basic - just adds npm scripts)')
   .action(init);
+
+program
+  .command('setup')
+  .description('Full setup - creates Supabase client files + npm scripts')
+  .option('--force', 'Overwrite existing files')
+  .action(setup);
 
 program
   .command('start')

@@ -78,47 +78,24 @@ supabase db diff --file initial_schema
 
 </details>
 
-### Step 2: Initialize supabase-stateful
+### Step 2: Run Setup
 
 ```bash
 # In your project directory (where supabase/config.toml exists)
-npx supabase-stateful init
+npx supabase-stateful setup
 ```
 
-This adds npm scripts to your package.json:
-- `npm run supabase:start` - Start and restore saved state
-- `npm run supabase:stop` - Save state and stop
-- `npm run supabase:status` - Show current status
+This automatically:
+- Creates Supabase client files in `src/utils/supabase/` (config.js, client.js, server.js, middleware.js)
+- Adds npm scripts: `supabase:start`, `supabase:stop`, `dev:local`, `dev:all:local`
+- Adds state file to `.gitignore`
 
-### Step 3: Set Up Local/Production Switching
-
-Copy the files from [templates/supabase/](templates/supabase/) to your project (e.g., `src/utils/supabase/`):
-
-```
-templates/supabase/
-├── config.js      # Environment detection (local vs production)
-├── client.js      # Browser client
-├── server.js      # Server component client
-├── admin.js       # Admin client (bypasses RLS)
-└── middleware.js  # Session handling
-```
-
-Then update your package.json:
-
-```json
-{
-  "scripts": {
-    "dev:local": "NEXT_PUBLIC_SUPABASE_LOCAL=true next dev",
-    "dev": "next dev"
-  }
-}
-```
-
-Now:
+Now you can:
 - `npm run dev:local` → Uses local Supabase (localhost:54321)
 - `npm run dev` → Uses cloud Supabase (from .env)
+- `npm run dev:all:local` → Starts Supabase + app + other services together
 
-### Step 4: Set Up CI/CD for Migrations
+### Step 3: Set Up CI/CD for Migrations
 
 Copy [templates/github-workflow/deploy.yml](templates/github-workflow/deploy.yml) to `.github/workflows/deploy.yml`.
 
@@ -230,7 +207,8 @@ They work together: `seed.sql` provides the foundation, `supabase-stateful` pres
 
 | Command | Description |
 |---------|-------------|
-| `init` | Initialize in your project |
+| `setup` | **Full setup** - creates Supabase client files + all npm scripts |
+| `init` | Basic init - just adds npm scripts (use `setup` instead) |
 | `start` | Start Supabase, restore state, apply migrations |
 | `stop` | Save state, clear auth tokens, stop |
 | `status` | Show running status and state info |
