@@ -59,12 +59,33 @@ async function applyMigrations() {
   log.info('Checking for pending migrations...');
 
   try {
-    const output = execSync('supabase migration list --output json', {
+    // Get migration list with --local flag to check local database status
+    const output = execSync('supabase migration list --local', {
       encoding: 'utf8',
       stdio: ['pipe', 'pipe', 'pipe'],
     });
 
-    const pendingCount = (output.match(/"Applied": false/g) || []).length;
+    // Parse table output - pending migrations have version in Local column but empty in Remote column
+    // Format: "   20251221044839 |                | 2025-12-21 04:48:39"
+    // A pending local migration has the version but an empty second column
+    const lines = output.split('\n');
+    let pendingCount = 0;
+
+    for (const line of lines) {
+      // Skip header lines and empty lines
+      if (line.includes('Local') || line.includes('---') || !line.trim()) continue;
+
+      // Split by | and check columns
+      const parts = line.split('|').map(p => p.trim());
+      if (parts.length >= 2) {
+        const localVersion = parts[0];
+        const remoteVersion = parts[1];
+        // If there's a local version but no remote version, it's pending
+        if (localVersion && /^\d+$/.test(localVersion) && !remoteVersion) {
+          pendingCount++;
+        }
+      }
+    }
 
     if (pendingCount > 0) {
       log.info(`Found ${pendingCount} pending migration(s)`);

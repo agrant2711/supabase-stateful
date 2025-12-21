@@ -39,6 +39,41 @@ Add these in your GitHub repository → Settings → Secrets and variables → A
 | `VERCEL_ORG_ID` | `.vercel/project.json` after `vercel link` |
 | `VERCEL_PROJECT_ID` | `.vercel/project.json` after `vercel link` |
 
+**Getting Vercel IDs:**
+
+The easiest way to get `VERCEL_ORG_ID` and `VERCEL_PROJECT_ID` is to link your project:
+
+```bash
+npx vercel link
+```
+
+This creates a `.vercel/project.json` file with both values:
+
+```json
+{
+  "orgId": "team_xxxxx",      ← VERCEL_ORG_ID
+  "projectId": "prj_xxxxx"    ← VERCEL_PROJECT_ID
+}
+```
+
+Copy these values to your GitHub secrets.
+
+**Disabling Vercel Auto-Deploy:**
+
+When you choose "Migrations + Vercel deploy", the setup automatically adds a `vercel.json` file with:
+
+```json
+{
+  "git": {
+    "deploymentEnabled": false
+  }
+}
+```
+
+This ensures Vercel only deploys via GitHub Actions (after migrations succeed). Without this, Vercel would auto-deploy on every push, even if migrations fail.
+
+If you set up manually or need to add this yourself, create `vercel.json` with the config above.
+
 ## How It Works
 
 On push to main:

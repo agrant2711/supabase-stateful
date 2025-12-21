@@ -10,19 +10,46 @@ Run `supabase init` first to create the local Supabase configuration.
 supabase init
 ```
 
-### "Migration history does not match"
+### "Migration history does not match" / "Remote migration versions not found"
 
-Your remote database has migration records that don't match local files.
+This happens when your remote database has migration records that don't exist in your local `supabase/migrations/` folder. Common causes:
 
-```bash
-# Mark a migration as applied (it exists in remote but not locally)
-supabase migration repair --status applied TIMESTAMP
+- **Existing project**: You ran migrations via Supabase Dashboard or another method before setting up local development
+- **Team member pushed migrations**: Someone else applied migrations that you don't have locally
+- **GitHub Actions failing**: The CI workflow can't find local files matching remote history
 
-# Mark a migration as reverted (it exists locally but shouldn't run)
-supabase migration repair --status reverted TIMESTAMP
-```
+**Solution:**
 
-Use the timestamp shown in the error message.
+1. First, check what's different:
+   ```bash
+   supabase migration list
+   ```
+
+   You'll see which migrations exist locally vs remotely:
+   ```
+   Local          | Remote         | Time (UTC)
+   ----------------|----------------|---------------------
+                   | 20251221033444 | 2025-12-21 03:34:44   ← Only on remote (problem!)
+   20251221033716 | 20251221033716 | 2025-12-21 03:37:16   ← Both (good)
+   ```
+
+2. For migrations that exist only on remote, mark them as reverted:
+   ```bash
+   supabase migration repair --status reverted 20251221033444
+   ```
+
+3. Pull your current schema to ensure local matches remote:
+   ```bash
+   supabase db pull
+   ```
+
+4. Verify the fix:
+   ```bash
+   supabase migration list
+   # Should show all migrations in both Local and Remote columns
+   ```
+
+5. Commit and push - your GitHub Actions should now pass.
 
 ### Docker Errors
 
@@ -80,6 +107,31 @@ The first time you run, there's no saved state - this is normal. Create some tes
 The Supabase client files are Next.js App Router specific. If you're using a different framework, the setup will skip client file creation.
 
 For other frameworks, you'll need to create your own Supabase client configuration that switches between local and production URLs.
+
+### GitHub Actions Workflow Fails on First Run
+
+For existing projects, the first GitHub Actions run often fails with "Remote migration versions not found". This is expected - see ["Migration history does not match"](#migration-history-does-not-match--remote-migration-versions-not-found) above.
+
+**Before enabling the workflow**, run these commands locally:
+
+```bash
+# 1. Link to your remote project
+supabase link --project-ref YOUR_PROJECT_REF
+
+# 2. Pull current schema and sync migration history
+supabase db pull
+
+# 3. Check for mismatches
+supabase migration list
+
+# 4. Fix any remote-only migrations
+supabase migration repair --status reverted TIMESTAMP
+
+# 5. Commit and push
+git add supabase/
+git commit -m "Sync migration history"
+git push
+```
 
 ## Getting Help
 

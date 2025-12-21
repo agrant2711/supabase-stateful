@@ -71,9 +71,10 @@ export async function init() {
     }
   }
 
-  // Add state file to .gitignore
+  // Add state file and backup to .gitignore
   await appendIfMissing('.gitignore', 'supabase/local-state.sql');
-  log.success('Added state file to .gitignore');
+  await appendIfMissing('.gitignore', 'supabase/local-state.sql.backup');
+  log.success('Added state files to .gitignore');
 
   console.log('');
   log.success('Initialized!');
