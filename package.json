@@ -16,7 +16,16 @@
     "development",
     "database",
     "state",
-    "persistence"
+    "persistence",
+    "nextjs",
+    "next",
+    "postgres",
+    "docker",
+    "cli",
+    "developer-tools",
+    "migrations",
+    "testing",
+    "seed-data"
   ],
   "author": "Anthony Grant",
   "license": "MIT",
