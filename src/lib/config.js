@@ -13,6 +13,9 @@ const CONFIG_FILE = '.supabase-stateful.json';
 const DEFAULT_CONFIG = {
   stateFile: 'supabase/local-state.sql',
   containerName: null,
+  // Services to run with dev:local (besides supabase and next)
+  // Each entry is { name: 'INNGEST', command: 'npm run inngest', color: 'magenta' }
+  devServices: [],
 };
 
 /**

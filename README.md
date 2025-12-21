@@ -66,6 +66,9 @@ Migrations run **on top of your existing data**, not on an empty database.
 | `start` | Start and restore state |
 | `stop` | Save state and stop |
 | `status` | Show current status |
+| `add` | Add a service to dev:local (e.g., Inngest, ngrok) |
+| `remove` | Remove a service from dev:local |
+| `services` | List configured services |
 
 ## Deployment
 
@@ -84,6 +87,7 @@ See [CI/CD with GitHub Actions](docs/github-actions.md) for setup details and re
 
 - [New Project Setup](docs/new-project.md)
 - [Existing Project Setup](docs/existing-project.md)
+- [Adding Services to dev:local](docs/dev-services.md) (Inngest, ngrok, Stripe, etc.)
 - [CI/CD with GitHub Actions](docs/github-actions.md)
 - [Troubleshooting](docs/troubleshooting.md)
 

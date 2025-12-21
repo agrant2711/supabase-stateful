@@ -8,6 +8,7 @@ import { stop } from '../src/commands/stop.js';
 import { status } from '../src/commands/status.js';
 import { sync } from '../src/commands/sync.js';
 import { exportData } from '../src/commands/export.js';
+import { add, remove, list } from '../src/commands/add.js';
 
 program
   .name('supabase-stateful')
@@ -55,5 +56,20 @@ program
   .option('--tables <tables>', 'Comma-separated list of tables')
   .option('--output <path>', 'Output file path')
   .action(exportData);
+
+program
+  .command('add [name] [command]')
+  .description('Add a service to dev:local (e.g., inngest, ngrok)')
+  .action(add);
+
+program
+  .command('remove [name]')
+  .description('Remove a service from dev:local')
+  .action(remove);
+
+program
+  .command('services')
+  .description('List services configured in dev:local')
+  .action(list);
 
 program.parse();

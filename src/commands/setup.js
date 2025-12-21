@@ -3,7 +3,7 @@
  *
  * This does everything init does, plus:
  * 1. Creates src/utils/supabase/ client files with local/production switching
- * 2. Adds dev:local and dev:all:local scripts
+ * 2. Adds dev:local script (runs all services with graceful shutdown)
  * 3. Optionally installs GitHub Actions workflow
  * 4. Optionally creates dev-local.sh with graceful shutdown
  */
@@ -189,26 +189,28 @@ export async function setup(options = {}) {
     }
 
     // Step 4: Detect utils path and create client files
-    const utilsPath = await detectUtilsPath();
-    if (utilsPath) {
-      let createClients = true;
+    let utilsPath = await detectUtilsPath();
 
-      if (isInteractive) {
-        createClients = await confirm(
-          'Create Supabase client files?',
-          'This creates config.js, client.js, server.js, and middleware.js\n' +
-          `in ${utilsPath}/supabase/ with automatic local/production switching.\n` +
-          'Use \`npm run dev:local\` for local, \`npm run dev\` for production.',
-          true
-        );
-      }
+    // If no utils path detected, default to src/utils (most common for Next.js)
+    if (!utilsPath) {
+      utilsPath = 'src/utils';
+      log.info(`Creating ${utilsPath}/ for Supabase client files`);
+    }
 
-      if (createClients) {
-        await createClientFiles(utilsPath, options.force, isInteractive);
-      }
-    } else {
-      log.warn('Could not detect utils path - skipping client file creation');
-      log.info('Manually copy files from templates/supabase/ to your project');
+    let createClients = true;
+
+    if (isInteractive) {
+      createClients = await confirm(
+        'Create Supabase client files?',
+        'This creates config.js, client.js, server.js, and middleware.js\n' +
+        `in ${utilsPath}/supabase/ with automatic local/production switching.\n` +
+        'Use \`npm run dev:local\` for local, \`npm run dev\` for production.',
+        true
+      );
+    }
+
+    if (createClients) {
+      await createClientFiles(utilsPath, options.force, isInteractive);
     }
   } else {
     log.dim('Skipping Supabase client files (Next.js not detected)');
@@ -289,14 +291,10 @@ export async function setup(options = {}) {
   log.success('Setup complete!');
   console.log('');
   console.log('Usage:');
-  console.log('  npm run dev:local           Start with local Supabase');
-  if (services.hasConcurrently) {
-    console.log('  npm run dev:all:local       Start all services with local Supabase');
-    if (await fileExists('scripts/dev-local.sh')) {
-      console.log('  ./scripts/dev-local.sh      Start with graceful shutdown (Ctrl+C saves state)');
-    }
-  }
+  console.log('  npm run dev:local           Start all services with graceful shutdown');
   console.log('  npm run supabase:stop       Save state and stop');
+  console.log('');
+  console.log('To add more services: npx supabase-stateful add');
 }
 
 /**
@@ -405,7 +403,7 @@ async function createClientFiles(utilsPath, force = false, isInteractive = false
 }
 
 /**
- * Add dev:local and dev:all:local scripts to package.json
+ * Add dev:local script to package.json
  */
 async function addDevScripts(services) {
   if (!await fileExists('package.json')) return;
@@ -415,16 +413,10 @@ async function addDevScripts(services) {
     const pkg = JSON.parse(pkgContent);
     pkg.scripts = pkg.scripts || {};
 
-    // Add dev:local
-    if (!pkg.scripts['dev:local']) {
-      pkg.scripts['dev:local'] = `NEXT_PUBLIC_SUPABASE_LOCAL=true ${services.devCmd}`;
+    // Add dev:local - points to bash script for graceful shutdown
+    if (services.hasConcurrently && !pkg.scripts['dev:local']) {
+      pkg.scripts['dev:local'] = './scripts/dev-local.sh';
       log.success('Added dev:local script');
-    }
-
-    // Add dev:all:local - point to the bash script for graceful shutdown
-    if (services.hasConcurrently && !pkg.scripts['dev:all:local']) {
-      pkg.scripts['dev:all:local'] = './scripts/dev-local.sh';
-      log.success('Added dev:all:local script');
     }
 
     await fs.writeFile('package.json', JSON.stringify(pkg, null, 2) + '\n');
@@ -514,21 +506,17 @@ async function addVercelConfig() {
 /**
  * Generate dev-local.sh script content
  */
-function generateDevLocalScript(services) {
-  const commands = ['"npm run supabase:start"', '"npm run dev:local"'];
-  const names = ['SUPABASE', 'NEXT'];
+function generateDevLocalScript(services, devServices = []) {
+  // Base commands: supabase start and next dev with local env var
+  const commands = ['"npm run supabase:start"', `"NEXT_PUBLIC_SUPABASE_LOCAL=true ${services.devCmd}"`];
+  const names = ['supabase', 'next'];
   const colors = ['green', 'cyan'];
 
-  if (services.hasInngest) {
-    commands.push('"npm run inngest"');
-    names.push('INNGEST');
-    colors.push('magenta');
-  }
-
-  if (services.hasNgrok) {
-    commands.push('"npm run ngrok"');
-    names.push('NGROK');
-    colors.push('yellow');
+  // Add detected/configured services
+  for (const svc of devServices) {
+    commands.push(`"${svc.command}"`);
+    names.push(svc.name.toLowerCase());
+    colors.push(svc.color);
   }
 
   return `#!/bin/bash
@@ -536,6 +524,8 @@ function generateDevLocalScript(services) {
 # Local Development Script with Graceful Shutdown
 # Generated by supabase-stateful setup
 # Press Ctrl+C to stop and save Supabase state
+#
+# To add more services: npx supabase-stateful add <name> "<command>"
 
 GREEN='\\033[0;32m'
 YELLOW='\\033[0;33m'
@@ -572,7 +562,6 @@ trap cleanup SIGINT SIGTERM
 npx concurrently \\
     --names "${names.join(',')}" \\
     --prefix-colors "${colors.join(',')}" \\
-    --kill-others-on-fail \\
     ${commands.join(' \\\n    ')} &
 
 DEV_PID=\$!
@@ -583,7 +572,7 @@ wait \$DEV_PID
 }
 
 /**
- * Create the dev-local.sh script
+ * Create the dev-local.sh script and optionally add extra services
  */
 async function createDevLocalScript(services, force = false) {
   const scriptsDir = 'scripts';
@@ -596,10 +585,65 @@ async function createDevLocalScript(services, force = false) {
     return;
   }
 
-  const content = generateDevLocalScript(services);
+  // Ask if user wants to add additional services
+  console.log('');
+  const addServices = await confirm('Would you like to add additional services to run with dev:local? (e.g., Inngest, ngrok)');
+
+  const devServices = [];
+
+  if (addServices) {
+    let addMore = true;
+    while (addMore) {
+      const service = await promptForService();
+      if (service) {
+        devServices.push(service);
+        log.success(`Added ${service.name}`);
+      }
+      addMore = await confirm('Add another service?');
+    }
+  } else {
+    console.log('');
+    log.info('You can add services later with: npx supabase-stateful add');
+  }
+
+  // Save services to config
+  const { getConfig, saveConfig } = await import('../lib/config.js');
+  const config = await getConfig();
+  config.devServices = devServices;
+  await saveConfig(config);
+
+  const content = generateDevLocalScript(services, devServices);
   await fs.writeFile(scriptPath, content, { mode: 0o755 });
 
   log.success('Created scripts/dev-local.sh');
+}
+
+/**
+ * Prompt user step-by-step for a service configuration
+ */
+async function promptForService() {
+  const { input, select } = await import('../utils/prompt.js');
+
+  console.log('');
+
+  // Step 1: Name
+  const name = await input('Service name (e.g., inngest, ngrok, stripe)');
+  if (!name) return null;
+
+  // Step 2: Command
+  const command = await input('Command to run (e.g., npx inngest-cli dev)');
+  if (!command) return null;
+
+  // Step 3: Color
+  const color = await select('Display color', [
+    { label: 'Magenta', value: 'magenta' },
+    { label: 'Yellow', value: 'yellow' },
+    { label: 'Blue', value: 'blue' },
+    { label: 'Red', value: 'red' },
+    { label: 'White', value: 'white' },
+  ]);
+
+  return { name: name.toLowerCase(), command, color };
 }
 
 /**

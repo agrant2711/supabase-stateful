@@ -82,6 +82,62 @@ On push to main:
 
 Pull requests skip migrations and only run the deploy preview.
 
+## Important: Writing Safe Migrations
+
+**What happens if deployment fails after migrations run?**
+
+The workflow runs migrations first, then deploys. If the deploy fails, your production database has the new schema but old code is still running. This can break your app.
+
+**The solution: Always write backwards-compatible migrations.**
+
+### Safe Migration Patterns
+
+| Do This | Not This |
+|---------|----------|
+| Add columns as nullable | Add required columns |
+| Add new tables | Rename existing tables |
+| Add new columns, then remove old ones later | Rename columns directly |
+| Keep old columns until code stops using them | Drop columns immediately |
+
+### Example: Renaming a Column Safely
+
+Instead of:
+```sql
+-- DANGEROUS: breaks old code immediately
+ALTER TABLE users RENAME COLUMN name TO full_name;
+```
+
+Do it in 3 separate deploys:
+
+**Deploy 1:** Add new column
+```sql
+ALTER TABLE users ADD COLUMN full_name TEXT;
+UPDATE users SET full_name = name;
+```
+
+**Deploy 2:** Update code to use `full_name` instead of `name`
+
+**Deploy 3:** Remove old column (after verifying no code uses it)
+```sql
+ALTER TABLE users DROP COLUMN name;
+```
+
+### Example: Adding a Required Field
+
+Instead of:
+```sql
+-- DANGEROUS: old code can't insert without this field
+ALTER TABLE users ADD COLUMN email TEXT NOT NULL;
+```
+
+Do:
+```sql
+-- SAFE: old code still works
+ALTER TABLE users ADD COLUMN email TEXT;
+```
+
+Then add the `NOT NULL` constraint in a later migration after all code provides the field.
+
 ## Workflow Options
 
 ### Migrations Only

@@ -50,6 +50,28 @@ export async function confirm(question, description = '', defaultValue = true) {
  * @param {string} defaultValue - Default option value
  * @returns {Promise<string>} - Selected option value
  */
+/**
+ * Ask user for free text input
+ * @param {string} question - The question/prompt to show
+ * @param {string} defaultValue - Default value if user presses enter
+ * @returns {Promise<string>} - User's input
+ */
+export async function input(question, defaultValue = '') {
+  const rl = readline.createInterface({
+    input: process.stdin,
+    output: process.stdout,
+  });
+
+  const hint = defaultValue ? ` (${defaultValue})` : '';
+
+  return new Promise((resolve) => {
+    rl.question(`${question}${hint}: `, (answer) => {
+      rl.close();
+      resolve(answer.trim() || defaultValue);
+    });
+  });
+}
+
 export async function select(question, options, defaultValue = null) {
   const rl = readline.createInterface({
     input: process.stdin,

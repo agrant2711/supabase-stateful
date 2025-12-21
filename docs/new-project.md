@@ -34,9 +34,9 @@ The wizard will prompt you to:
 
 ```bash
 npm run dev:local
-# or for graceful shutdown (Ctrl+C saves state):
-./scripts/dev-local.sh
 ```
+
+This runs all services with graceful shutdown. Press Ctrl+C to save state and exit.
 
 Access Supabase Studio at http://localhost:54323 to create tables and add data.
 
@@ -54,11 +54,9 @@ This creates a migration file in `supabase/migrations/`.
 
 | Script | Description |
 |--------|-------------|
-| `npm run dev:local` | Run Next.js with local Supabase |
-| `npm run dev:all:local` | Run all services together |
+| `npm run dev:local` | Run all services with graceful shutdown |
 | `npm run supabase:start` | Start Supabase with state restore |
 | `npm run supabase:stop` | Save state and stop |
-| `./scripts/dev-local.sh` | Run with graceful shutdown |
 
 ## Switching Between Local and Production
 
