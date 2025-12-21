@@ -63,12 +63,17 @@ Migrations run **on top of your existing data**, not on an empty database.
 | Command | Description |
 |---------|-------------|
 | `setup` | Interactive setup wizard |
-| `start` | Start and restore state |
-| `stop` | Save state and stop |
+| `init` | Basic init (just npm scripts, no client files) |
+| `start` | Start Supabase and restore saved state |
+| `stop` | Save state and stop Supabase |
 | `status` | Show current status |
 | `add` | Add a service to dev:local (e.g., Inngest, ngrok) |
 | `remove` | Remove a service from dev:local |
 | `services` | List configured services |
+| `sync` | Sync cloud data to local database |
+| `export` | Export cloud data to seed file |
+
+Run `npx supabase-stateful --help` for all options.
 
 ## Deployment
 
