@@ -23,6 +23,7 @@ program
   .command('setup')
   .description('Full setup - creates Supabase client files + npm scripts')
   .option('--force', 'Overwrite existing files')
+  .option('-y, --yes', 'Skip interactive prompts (auto-confirm defaults)')
   .action(setup);
 
 program

@@ -2,261 +2,77 @@
 
 > Persistent local state for Supabase development
 
+**Note:** Currently supports Next.js (App Router) only. The core state persistence works with any framework, but the generated client files are Next.js specific.
+
 ## The Problem
 
-Local Supabase is **stateless by default**. Stop it, lose everything. Restart, get `duplicate key` errors from stale auth tokens.
+Local Supabase is **stateless by default**. Stop it, lose everything. Restart, get `duplicate key` errors.
 
 ## The Solution
 
 ```bash
-npx supabase-stateful init    # One-time setup
+npx supabase-stateful setup   # Interactive setup
 
-npm run supabase:start        # Starts with previous session restored
+npm run supabase:start        # Restores your previous session
 # ... develop, create test users, add data ...
-npm run supabase:stop         # Saves state, clears auth tokens, stops cleanly
+npm run supabase:stop         # Saves state for next time
 ```
 
-Next time you start, **everything** is back - your test users, all the data you created, relationships intact.
+Next time you start, **everything is back** - test users, data, relationships intact.
 
----
+## Quick Start
 
-## Setup Guide
-
-### Prerequisites
-
-1. **Supabase CLI** - [Install guide](https://supabase.com/docs/guides/cli)
-2. **Docker** - [Install Docker Desktop](https://docs.docker.com/desktop)
-
-### Step 1: Set Up Local Supabase
-
-Choose your scenario:
-
-<details>
-<summary><b>I have an existing cloud Supabase project</b></summary>
+**Prerequisites:** [Supabase CLI](https://supabase.com/docs/guides/cli) and [Docker](https://docs.docker.com/desktop)
 
 ```bash
-# 1. Initialize local Supabase (creates supabase/ folder with config.toml)
-supabase init
+# 1. Have a Supabase project (run `supabase init` if you don't)
 
-# 2. Login to Supabase
-supabase login
-
-# 3. Link to your cloud project
-supabase link --project-ref YOUR_PROJECT_REF
-# Find project ref: Supabase Dashboard → Project Settings → General
-
-# 4. Pull your schema as a baseline migration
-supabase db pull
-# Creates: supabase/migrations/YYYYMMDD_remote_schema.sql
-
-# 5. If you get "migration history does not match" errors:
-supabase migration repair --status applied MIGRATION_TIMESTAMP
-# Use the timestamp shown in the error message
-
-# 6. Verify local and remote are in sync
-supabase migration list
-# Should show matching timestamps in Local and Remote columns
-```
-
-</details>
-
-<details>
-<summary><b>I'm starting a new project</b></summary>
-
-```bash
-# 1. Initialize local Supabase
-supabase init
-
-# 2. Start local Supabase
-supabase start
-
-# 3. Create your schema in Studio (localhost:54323)
-
-# 4. Generate your initial migration
-supabase db diff --file initial_schema
-```
-
-</details>
-
-### Step 2: Run Setup
-
-```bash
-# In your project directory (where supabase/config.toml exists)
+# 2. Run interactive setup
 npx supabase-stateful setup
+
+# 3. Start developing
+npm run dev:local             # or ./scripts/dev-local.sh for graceful shutdown
 ```
 
-This automatically:
-- Creates Supabase client files in `src/utils/supabase/` (config.js, client.js, server.js, middleware.js)
-- Adds npm scripts: `supabase:start`, `supabase:stop`, `dev:local`, `dev:all:local`
-- Adds state file to `.gitignore`
-
-Now you can:
-- `npm run dev:local` → Uses local Supabase (localhost:54321)
-- `npm run dev` → Uses cloud Supabase (from .env)
-- `npm run dev:all:local` → Starts Supabase + app + other services together
-
-### Step 3: Set Up CI/CD for Migrations
-
-Copy [templates/github-workflow/deploy.yml](templates/github-workflow/deploy.yml) to `.github/workflows/deploy.yml`.
-
-Add these secrets to your GitHub repository:
-
-| Secret | Where to find it |
-|--------|------------------|
-| `SUPABASE_ACCESS_TOKEN` | [Supabase Dashboard](https://supabase.com/dashboard/account/tokens) |
-| `SUPABASE_PROJECT_REF` | Project Settings → General |
-| `SUPABASE_DB_PASSWORD` | Project Settings → Database |
-| `VERCEL_TOKEN` | [Vercel Account Settings](https://vercel.com/account/tokens) (if using Vercel) |
-| `VERCEL_ORG_ID` | `.vercel/project.json` after `vercel link` |
-| `VERCEL_PROJECT_ID` | `.vercel/project.json` after `vercel link` |
-
-Now when you push to main:
-1. Migrations run on production database
-2. App deploys to Vercel
-
----
+The setup wizard will:
+- Install required dependencies (`@supabase/ssr`, `@supabase/supabase-js`, `concurrently`)
+- Create Supabase client files with local/production switching (Next.js only)
+- Add npm scripts for stateful start/stop
+- Generate a graceful shutdown script (Ctrl+C saves state automatically)
+- Optionally install GitHub Actions for CI/CD migrations
 
 ## Daily Workflow
 
-### Start your day
-
 ```bash
-npm run dev:local    # Starts local Supabase + app, restores your data
+npm run dev:local           # Start with local Supabase (restores your data)
+npm run supabase:stop       # Save state and stop (or Ctrl+C with dev-local.sh)
 ```
-
-### Make schema changes
-
-```bash
-# 1. Make changes in Supabase Studio (localhost:54323)
-
-# 2. Generate a migration
-supabase db diff --file add_user_preferences
-
-# 3. Commit the migration
-git add supabase/migrations
-git commit -m "Add user preferences table"
-git push    # Triggers CI/CD to apply migration to production
-```
-
-### End your day
-
-```bash
-# Ctrl+C or:
-npm run supabase:stop    # Saves your test data for next session
-```
-
-### When a teammate adds migrations
-
-```bash
-git pull                    # Get their migration files
-npm run supabase:start      # Your data is restored, then their migrations run on top
-```
-
----
 
 ## How It Works
 
-**On stop:**
-1. Export entire database state (schema + data for `public` and `auth` schemas)
-2. Clear `auth.refresh_tokens` (prevents duplicate key errors)
-3. Stop Supabase
+| On Stop | On Start |
+|---------|----------|
+| Export database state | Start Supabase |
+| Clear auth tokens | Restore saved state |
+| Stop Supabase | Apply pending migrations on top |
 
-**On start:**
-1. Start Supabase
-2. Restore saved state (schema + data from your last session)
-3. Apply pending migrations **on top of your data** via `supabase migration up`
-
-The key insight: migrations run ON TOP of your existing data, not on an empty database. When a teammate adds a migration that renames a column, it actually transforms YOUR data.
-
----
-
-## Why Not Just Use seed.sql?
-
-| | seed.sql | supabase-stateful |
-|---|---|---|
-| **What it is** | Static baseline data | Your development session |
-| **Committed to git** | Yes | No (gitignored) |
-| **Shared with team** | Yes | No (each dev has their own) |
-| **When it runs** | Every `supabase db reset` | Only when you start/stop |
-| **Contains** | Default categories, settings | Users you created, Stripe test customers, orders you made |
-
-They work together: `seed.sql` provides the foundation, `supabase-stateful` preserves your work on top of it.
-
----
-
-## When to Use This
-
-**External Service Integration**
-- Stripe test mode - consistent test customers, subscriptions across sessions
-- Email services - test users with specific email states
-- Webhook testing - predictable user/order states
-
-**Complex Test Data**
-- E-commerce: products linked to Stripe, carts, orders
-- SaaS: users with different subscription tiers
-- Data with foreign key relationships that's tedious to recreate
-
-**Team Development**
-- Each developer has isolated test data
-- No more "who deleted my test account?"
-- Demo data stays consistent for stakeholder reviews
-
----
+Migrations run **on top of your existing data**, not on an empty database.
 
 ## Commands
 
 | Command | Description |
 |---------|-------------|
-| `setup` | **Full setup** - creates Supabase client files + all npm scripts |
-| `init` | Basic init - just adds npm scripts (use `setup` instead) |
-| `start` | Start Supabase, restore state, apply migrations |
-| `stop` | Save state, clear auth tokens, stop |
-| `status` | Show running status and state info |
-| `export` | Export cloud data to seed file |
-| `sync` | Export cloud data and apply to local |
+| `setup` | Interactive setup wizard |
+| `start` | Start and restore state |
+| `stop` | Save state and stop |
+| `status` | Show current status |
 
----
+## Documentation
 
-## Cloud Sync (Optional)
-
-Pull data from production to seed local development:
-
-```bash
-export SUPABASE_URL=https://xxx.supabase.co
-export SUPABASE_SERVICE_ROLE_KEY=eyJ...
-
-npx supabase-stateful sync --sample
-```
-
-Options:
-- `--sample` - Limit to 100 rows per table
-- `--tables users,products` - Export specific tables
-
----
-
-## Troubleshooting
-
-**"migration history does not match"**
-
-Your remote database has migration records that don't match local files. Fix with:
-```bash
-supabase migration repair --status applied TIMESTAMP
-# or
-supabase migration repair --status reverted TIMESTAMP
-```
-
-**"Cannot find supabase/config.toml"**
-
-Run `supabase init` first to create the local Supabase config.
-
-**Docker errors**
-
-Make sure Docker Desktop is running:
-```bash
-docker ps    # Should show output, not an error
-```
-
----
+- [New Project Setup](docs/new-project.md)
+- [Existing Project Setup](docs/existing-project.md)
+- [CI/CD with GitHub Actions](docs/github-actions.md)
+- [Troubleshooting](docs/troubleshooting.md)
 
 ## License
 

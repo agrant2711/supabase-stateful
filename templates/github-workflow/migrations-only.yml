@@ -1,0 +1,62 @@
+name: Database Migrations
+
+on:
+  push:
+    branches: [main]
+
+jobs:
+  migrate:
+    name: Database Migrations
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Supabase CLI
+        uses: supabase/setup-cli@v1
+        with:
+          version: latest
+
+      - name: Authenticate with Supabase
+        run: |
+          if [ -z "${{ secrets.SUPABASE_ACCESS_TOKEN }}" ]; then
+            echo "SUPABASE_ACCESS_TOKEN secret is not set"
+            exit 1
+          fi
+          supabase login --token ${{ secrets.SUPABASE_ACCESS_TOKEN }}
+
+      - name: Link to Supabase project
+        run: |
+          if [ -z "${{ secrets.SUPABASE_PROJECT_REF }}" ]; then
+            echo "SUPABASE_PROJECT_REF secret is not set"
+            exit 1
+          fi
+          if [ -z "${{ secrets.SUPABASE_DB_PASSWORD }}" ]; then
+            echo "SUPABASE_DB_PASSWORD secret is not set"
+            exit 1
+          fi
+          supabase link --project-ref ${{ secrets.SUPABASE_PROJECT_REF }} --password "${{ secrets.SUPABASE_DB_PASSWORD }}"
+
+      - name: Check for migration files
+        run: |
+          if [ -d "supabase/migrations" ] && [ "$(ls -A supabase/migrations/*.sql 2>/dev/null)" ]; then
+            echo "Found migration files:"
+            ls -la supabase/migrations/
+          else
+            echo "No migration files found"
+            exit 0
+          fi
+
+      - name: Apply migrations to production
+        env:
+          SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
+          SUPABASE_DB_PASSWORD: ${{ secrets.SUPABASE_DB_PASSWORD }}
+          SUPABASE_PROJECT_ID: ${{ secrets.SUPABASE_PROJECT_REF }}
+        run: |
+          if [ ! -d "supabase/migrations" ] || [ -z "$(ls -A supabase/migrations/*.sql 2>/dev/null)" ]; then
+            echo "No migration files to apply"
+            exit 0
+          fi
+          supabase db push --linked
+          echo "All migrations applied successfully"
