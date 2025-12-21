@@ -523,44 +523,31 @@ NC='\\033[0m'
 echo -e "\${CYAN}Starting local development environment...\${NC}"
 echo ""
 
-cleanup() {
-    echo ""
-    echo -e "\${YELLOW}Stopping dev server...\${NC}"
-
-    kill $DEV_PID 2>/dev/null
-    sleep 1
-
-    echo ""
-    echo -e "\${CYAN}Save Supabase state and stop? [Y/n]\${NC}"
-    echo -e "\${CYAN}(Choose 'n' if you're just restarting the dev server)\${NC}"
-
-    # Read with timeout, default to Yes
-    read -t 10 -n 1 response
-    echo ""
-
-    if [[ "\$response" =~ ^[Nn]$ ]]; then
-        echo -e "\${GREEN}Dev server stopped. Supabase still running.\${NC}"
-        echo -e "Run \${YELLOW}npx supabase-stateful stop\${NC} later to save state."
-    else
-        echo -e "\${CYAN}Saving Supabase state...\${NC}"
-        npx supabase-stateful stop
-        echo ""
-        echo -e "\${GREEN}Development environment stopped. State saved.\${NC}"
-    fi
-
-    exit 0
-}
-
-trap cleanup SIGINT SIGTERM
-
+# Run concurrently (it will handle Ctrl+C and stop all processes)
 npx concurrently \\
     --names "${names.join(',')}" \\
     --prefix-colors "${colors.join(',')}" \\
-    ${commands.join(' \\\n    ')} &
+    --kill-others-on-fail \\
+    ${commands.join(' \\\n    ')}
 
-DEV_PID=$!
+# After concurrently exits (from Ctrl+C or error), ask about saving state
+echo ""
+echo -e "\${CYAN}Save Supabase state and stop? [Y/n]\${NC}"
+echo -e "\${CYAN}(Choose 'n' if you're just restarting the dev server)\${NC}"
 
-wait $DEV_PID
+# Read with timeout, default to Yes
+read -t 10 -n 1 response
+echo ""
+
+if [[ "\$response" =~ ^[Nn]$ ]]; then
+    echo -e "\${GREEN}Dev server stopped. Supabase still running.\${NC}"
+    echo -e "Run \${YELLOW}npx supabase-stateful stop\${NC} later to save state."
+else
+    echo -e "\${CYAN}Saving Supabase state...\${NC}"
+    npx supabase-stateful stop
+    echo ""
+    echo -e "\${GREEN}Development environment stopped. State saved.\${NC}"
+fi
 `;
 }
 
