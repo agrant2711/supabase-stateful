@@ -7,6 +7,13 @@
  * Usage:
  *   npm run dev:local     -> NEXT_PUBLIC_SUPABASE_LOCAL=true  -> uses localhost:54321
  *   npm run dev           -> NEXT_PUBLIC_SUPABASE_LOCAL=false -> uses cloud Supabase
+ *
+ * Required environment variables for production (.env.local):
+ *   NEXT_PUBLIC_SUPABASE_URL=https://your-project.supabase.co
+ *   NEXT_PUBLIC_SUPABASE_ANON_KEY=eyJ...
+ *   SUPABASE_SERVICE_ROLE_KEY=eyJ...  (optional, for admin operations)
+ *
+ * Find these in: Supabase Dashboard -> Project Settings -> API
  */
 
 const isLocalDev = process.env.NEXT_PUBLIC_SUPABASE_LOCAL === 'true'
