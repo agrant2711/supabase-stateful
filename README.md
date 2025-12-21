@@ -67,6 +67,19 @@ Migrations run **on top of your existing data**, not on an empty database.
 | `stop` | Save state and stop |
 | `status` | Show current status |
 
+## Deployment
+
+The setup wizard can install a GitHub Actions workflow for CI/CD:
+
+```
+Push to main → Run migrations on production → Deploy app
+```
+
+1. **Migrations job** - Applies your local `supabase/migrations/*.sql` files to your production Supabase database
+2. **Deploy job** - Builds and deploys your app to Vercel (optional)
+
+See [CI/CD with GitHub Actions](docs/github-actions.md) for setup details and required secrets.
+
 ## Documentation
 
 - [New Project Setup](docs/new-project.md)
