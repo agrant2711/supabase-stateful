@@ -523,12 +523,24 @@ NC='\\033[0m'
 echo -e "\${CYAN}Starting local development environment...\${NC}"
 echo ""
 
-# Run concurrently (it will handle Ctrl+C and stop all processes)
+# Trap SIGINT so the shell doesn't exit when Ctrl+C is pressed
+# This allows us to run cleanup code after concurrently exits
+trap 'echo ""' INT
+
+# Run concurrently in background so trap can catch SIGINT
 npx concurrently \\
     --names "${names.join(',')}" \\
     --prefix-colors "${colors.join(',')}" \\
     --kill-others-on-fail \\
-    ${commands.join(' \\\n    ')}
+    ${commands.join(' \\\n    ')} &
+
+CONCURRENT_PID=\$!
+
+# Wait for concurrently to finish (will return immediately when SIGINT is received)
+wait \$CONCURRENT_PID 2>/dev/null
+
+# Small delay to let processes finish their output
+sleep 0.5
 
 # After concurrently exits (from Ctrl+C or error), ask about saving state
 echo ""
