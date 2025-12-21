@@ -191,9 +191,9 @@ export async function setup(options = {}) {
     // Step 4: Detect utils path and create client files
     let utilsPath = await detectUtilsPath();
 
-    // If no utils path detected, default to src/utils (most common for Next.js)
+    // If no utils path detected, default to utils/ at root
     if (!utilsPath) {
-      utilsPath = 'src/utils';
+      utilsPath = 'utils';
       log.info(`Creating ${utilsPath}/ for Supabase client files`);
     }
 
@@ -298,25 +298,21 @@ export async function setup(options = {}) {
 }
 
 /**
- * Detect where utils folder is (src/utils, utils, lib, src/lib)
+ * Detect where utils folder is (utils, lib at root preferred)
  */
 async function detectUtilsPath() {
+  // Prefer root-level paths (standard Next.js convention)
   const candidates = [
-    'src/utils',
-    'src/lib',
     'utils',
     'lib',
+    'src/utils',
+    'src/lib',
   ];
 
   for (const candidate of candidates) {
     if (await fileExists(candidate)) {
       return candidate;
     }
-  }
-
-  // If src exists, create src/utils
-  if (await fileExists('src')) {
-    return 'src/utils';
   }
 
   return null;
