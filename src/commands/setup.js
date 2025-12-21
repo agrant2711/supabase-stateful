@@ -540,10 +540,10 @@ cleanup() {
 
     if [[ "\$response" =~ ^[Nn]$ ]]; then
         echo -e "\${GREEN}Dev server stopped. Supabase still running.\${NC}"
-        echo -e "Run \${YELLOW}npm run supabase:stop\${NC} later to save state."
+        echo -e "Run \${YELLOW}npx supabase-stateful stop\${NC} later to save state."
     else
         echo -e "\${CYAN}Saving Supabase state...\${NC}"
-        npm run supabase:stop
+        npx supabase-stateful stop
         echo ""
         echo -e "\${GREEN}Development environment stopped. State saved.\${NC}"
     fi
