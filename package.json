@@ -1,6 +1,6 @@
 {
   "name": "supabase-stateful",
-  "version": "0.1.6",
+  "version": "0.1.7",
   "description": "Persistent local state for Supabase development",
   "type": "module",
   "bin": {
