@@ -31,11 +31,11 @@ export async function saveState() {
   const tablesQuery = `
     SELECT schemaname, tablename
     FROM pg_tables
-    WHERE schemaname IN ('public', 'auth')
+    WHERE schemaname IN ('public', 'auth', 'storage')
       AND tablename NOT LIKE 'supabase_%'
       AND tablename NOT LIKE '%_migrations'
       AND tablename NOT LIKE 'pg_%'
-      AND tablename NOT IN ('schema_migrations', 'spatial_ref_sys')
+      AND tablename NOT IN ('schema_migrations', 'spatial_ref_sys', 's3_multipart_uploads', 's3_multipart_uploads_parts')
     ORDER BY schemaname, tablename;
   `;
 
@@ -87,6 +87,7 @@ export async function saveState() {
 -- This file contains your local development state including:
 -- • auth.users (test users you created)
 -- • All public schema data
+-- • storage.buckets and storage.objects (file metadata)
 -- • Foreign key relationships intact
 --
 -- This preserves your local development progress between sessions
@@ -129,6 +130,14 @@ export async function restoreState() {
     return false;
   }
 
+  // Disable storage triggers before restore (they block INSERT/DELETE)
+  try {
+    execSync(
+      `docker exec ${container} psql -U postgres -d postgres -c "ALTER TABLE IF EXISTS storage.objects DISABLE TRIGGER ALL; ALTER TABLE IF EXISTS storage.buckets DISABLE TRIGGER ALL;"`,
+      { encoding: 'utf8', stdio: 'pipe' }
+    );
+  } catch { /* table may not exist yet */ }
+
   // Copy state file into container
   execSync(`docker cp "${config.stateFile}" "${container}:/tmp/state.sql"`);
 
@@ -142,6 +151,14 @@ export async function restoreState() {
     // Errors during restore are tolerated (likely duplicate key conflicts)
     // The ON CONFLICT DO NOTHING handles most cases, but some edge cases may error
   }
+
+  // Re-enable storage triggers
+  try {
+    execSync(
+      `docker exec ${container} psql -U postgres -d postgres -c "ALTER TABLE IF EXISTS storage.objects ENABLE TRIGGER ALL; ALTER TABLE IF EXISTS storage.buckets ENABLE TRIGGER ALL;"`,
+      { encoding: 'utf8', stdio: 'pipe' }
+    );
+  } catch { /* ignore */ }
 
   return true;
 }

@@ -94,3 +94,64 @@ export function isRunning() {
     return false;
   }
 }
+
+/**
+ * Get the project name from the container name config
+ * e.g., "supabase_db_homefree" → "homefree"
+ */
+export async function getProjectName() {
+  const config = await getConfig();
+  return config.containerName.replace('supabase_db_', '');
+}
+
+/**
+ * Get docker logs for the DB container (last N lines)
+ * Works even when the container has exited (crashed)
+ */
+export function getDbContainerLogs(tailLines = 50) {
+  try {
+    const containers = execSync(
+      'docker ps -a --format "{{.Names}}" --filter "name=supabase_db_"',
+      { encoding: 'utf8', stdio: ['pipe', 'pipe', 'pipe'] }
+    );
+    const containerName = containers.trim().split('\n')[0];
+    if (!containerName) return '';
+
+    return execSync(
+      `docker logs --tail ${tailLines} ${containerName} 2>&1`,
+      { encoding: 'utf8', stdio: ['pipe', 'pipe', 'pipe'] }
+    );
+  } catch (err) {
+    return err.stderr || err.stdout || '';
+  }
+}
+
+/**
+ * Check if a Docker volume exists
+ */
+export function volumeExists(volumeName) {
+  try {
+    execSync(`docker volume inspect ${volumeName}`, {
+      encoding: 'utf8',
+      stdio: ['pipe', 'pipe', 'pipe'],
+    });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Remove a specific Docker volume
+ */
+export function removeVolume(volumeName) {
+  try {
+    execSync(`docker volume rm ${volumeName}`, {
+      encoding: 'utf8',
+      stdio: ['pipe', 'pipe', 'pipe'],
+    });
+    return true;
+  } catch {
+    return false;
+  }
+}

@@ -51,6 +51,41 @@ This happens when your remote database has migration records that don't exist in
 
 5. Commit and push - your GitHub Actions should now pass.
 
+### PostgreSQL Version Incompatibility
+
+If `supabase start` fails with:
+
+```
+FATAL: database files are incompatible with server
+DETAIL: The data directory was initialized by PostgreSQL version 15,
+  which is not compatible with this version 17.
+```
+
+This means the Supabase CLI has upgraded its PostgreSQL version but your existing data volume was created with the old version.
+
+**Automatic fix:**
+
+`supabase-stateful start` detects this automatically and offers to upgrade your data:
+
+```bash
+npm run supabase:start
+# Will detect the version mismatch and prompt you to upgrade
+```
+
+**Manual fix:**
+
+```bash
+npx supabase-stateful upgrade
+```
+
+This will:
+1. Export all your data using the old PostgreSQL version
+2. Remove the incompatible database volume (storage files are preserved)
+3. Start Supabase fresh with the new PostgreSQL
+4. Restore your data
+
+If auto-detection fails (e.g., the container was already removed), the upgrade command will prompt you to enter the version numbers manually.
+
 ### Docker Errors
 
 Make sure Docker Desktop is running:

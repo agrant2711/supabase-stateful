@@ -13,7 +13,8 @@
 
 import { execSync, spawnSync } from 'child_process';
 import { restoreState, stateExists } from '../lib/state.js';
-import { isRunning } from '../lib/docker.js';
+import { isRunning, getDbContainerLogs } from '../lib/docker.js';
+import { detectVersionMismatch, runUpgrade } from '../lib/upgrade.js';
 import { log } from '../utils/log.js';
 
 export async function start() {
@@ -28,6 +29,17 @@ export async function start() {
 
   // Start Supabase
   if (!await startSupabase()) {
+    // Before giving up, check if this is a PG version mismatch
+    const upgraded = await checkForPgUpgrade();
+    if (upgraded) {
+      // Upgrade restored data from the old volume.
+      // Still apply saved state + new migrations on top.
+      await restoreSavedState();
+      await applyMigrations();
+      printReady();
+      return;
+    }
+
     log.error('Failed to start Supabase');
     process.exit(1);
   }
@@ -49,6 +61,31 @@ async function handleRunningInstance() {
   // Apply pending migrations on top of existing data
   await applyMigrations();
   printReady();
+}
+
+/**
+ * Check docker logs for PG version mismatch and offer upgrade if detected
+ * Returns true if upgrade was performed successfully
+ */
+async function checkForPgUpgrade() {
+  log.dim('Checking for PostgreSQL version incompatibility...');
+
+  const logs = getDbContainerLogs(100);
+  const mismatch = detectVersionMismatch(logs);
+
+  if (!mismatch) {
+    return false;
+  }
+
+  log.warn(
+    `Detected PostgreSQL version mismatch: ` +
+    `data is PG${mismatch.oldVersion}, server is PG${mismatch.newVersion}`
+  );
+
+  return await runUpgrade({
+    oldVersion: mismatch.oldVersion,
+    newVersion: mismatch.newVersion,
+  });
 }
 
 /**

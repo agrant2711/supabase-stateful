@@ -9,6 +9,7 @@ import { status } from '../src/commands/status.js';
 import { sync } from '../src/commands/sync.js';
 import { exportData } from '../src/commands/export.js';
 import { add, remove, list } from '../src/commands/add.js';
+import { upgrade } from '../src/commands/upgrade.js';
 
 program
   .name('supabase-stateful')
@@ -71,5 +72,10 @@ program
   .command('services')
   .description('List services configured in dev:local')
   .action(list);
+
+program
+  .command('upgrade')
+  .description('Upgrade PostgreSQL version (when Supabase CLI updates PG)')
+  .action(upgrade);
 
 program.parse();
