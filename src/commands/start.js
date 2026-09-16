@@ -89,6 +89,77 @@ async function checkForPgUpgrade() {
 }
 
 /**
+ * Count the migrations present locally but not yet applied to the database.
+ *
+ * Exported and PURE so the parsing can be exercised without a Supabase install
+ * — this function is where the silent failure lived, and a silent failure is
+ * precisely what a test has to be able to reach.
+ *
+ * ## Two formats, because the CLI changed under us
+ *
+ * `supabase migration list` printed an ASCII table for years:
+ *
+ *     20251221044839 |                | 2025-12-21 04:48:39
+ *
+ * Newer CLIs (2.x) emit JSON instead:
+ *
+ *     {"migrations":[{"local":"20251221044839","remote":"","time":"…"}]}
+ *
+ * JSON contains no `|`, so the old table parser matched nothing, counted zero
+ * pending migrations and reported "No pending migrations" — while `migration
+ * up` was never called. Every migration added after the user upgraded their CLI
+ * was silently skipped, with a success message on screen. That is the worst
+ * available failure mode: the tool said the thing it was built to do had been
+ * done.
+ *
+ * Both formats are handled rather than only the new one, because this package
+ * cannot control which CLI a consumer has installed, and the table format is
+ * still what older versions produce.
+ *
+ * @param {string} output Raw stdout from `supabase migration list`.
+ * @returns {number} How many migrations exist locally but are not applied.
+ */
+export function countPendingMigrations(output) {
+  const trimmed = (output ?? '').trim();
+  if (!trimmed) return 0;
+
+  // JSON first — it is what current CLIs emit, and it is unambiguous.
+  if (trimmed.startsWith('{') || trimmed.startsWith('[')) {
+    try {
+      const parsed = JSON.parse(trimmed);
+      const migrations = Array.isArray(parsed) ? parsed : (parsed.migrations ?? []);
+      // A pending migration has a local version and NO remote one. `remote` is
+      // an empty string rather than absent, so falsiness is the right test.
+      return migrations.filter((m) => m?.local && !m?.remote).length;
+    } catch {
+      // Malformed JSON is not a table — fall through and let the table parser
+      // find nothing rather than guessing.
+    }
+  }
+
+  // Legacy ASCII table.
+  let pendingCount = 0;
+
+  for (const line of trimmed.split('\n')) {
+    // Skip header lines and empty lines
+    if (line.includes('Local') || line.includes('---') || !line.trim()) continue;
+
+    // Split by | and check columns
+    const parts = line.split('|').map((p) => p.trim());
+    if (parts.length >= 2) {
+      const localVersion = parts[0];
+      const remoteVersion = parts[1];
+      // If there's a local version but no remote version, it's pending
+      if (localVersion && /^\d+$/.test(localVersion) && !remoteVersion) {
+        pendingCount++;
+      }
+    }
+  }
+
+  return pendingCount;
+}
+
+/**
  * Apply pending migrations ON TOP of existing data
  * Uses `supabase migration up` instead of `db reset` to preserve data
  */
@@ -96,42 +167,35 @@ async function applyMigrations() {
   log.info('Checking for pending migrations...');
 
   try {
-    // Get migration list with --local flag to check local database status
-    const output = execSync('supabase migration list --local', {
+    // `--output-format json` is REQUESTED, never assumed. The default format is
+    // the CLI's to change — and when it changed from table to JSON, this check
+    // silently stopped finding anything. Asking for a format explicitly means a
+    // future default cannot break it again.
+    //
+    // Older CLIs do not know the flag and exit non-zero, which lands in the
+    // catch below and applies migrations anyway — the safe direction. The
+    // parser still understands the table format for anyone pinned there.
+    const output = execSync('supabase migration list --local --output-format json', {
       encoding: 'utf8',
       stdio: ['pipe', 'pipe', 'pipe'],
     });
 
-    // Parse table output - pending migrations have version in Local column but empty in Remote column
-    // Format: "   20251221044839 |                | 2025-12-21 04:48:39"
-    // A pending local migration has the version but an empty second column
-    const lines = output.split('\n');
-    let pendingCount = 0;
-
-    for (const line of lines) {
-      // Skip header lines and empty lines
-      if (line.includes('Local') || line.includes('---') || !line.trim()) continue;
-
-      // Split by | and check columns
-      const parts = line.split('|').map(p => p.trim());
-      if (parts.length >= 2) {
-        const localVersion = parts[0];
-        const remoteVersion = parts[1];
-        // If there's a local version but no remote version, it's pending
-        if (localVersion && /^\d+$/.test(localVersion) && !remoteVersion) {
-          pendingCount++;
-        }
-      }
-    }
+    const pendingCount = countPendingMigrations(output);
 
     if (pendingCount > 0) {
       log.info(`Found ${pendingCount} pending migration(s)`);
       log.info('Applying migrations on top of existing data...');
 
       // Use `migration up` instead of `db reset` - this applies migrations WITHOUT wiping data
-      const result = spawnSync('supabase', ['migration', 'up'], {
+      //
+      // `--local` MATCHES THE CHECK ABOVE, and must. The list is read with
+      // `--local`, so without it here the tool decides what is pending by
+      // looking at the local database and then applies it to whatever
+      // `migration up` defaults to — the LINKED project when one is configured.
+      // This command exists to manage a local stack; it must never reach a
+      // remote database.
+      const result = spawnSync('supabase', ['migration', 'up', '--local'], {
         stdio: 'inherit',
-        shell: true,
       });
 
       if (result.status !== 0) {
@@ -147,9 +211,8 @@ async function applyMigrations() {
     // Migration check failed, try applying anyway
     log.dim('Could not check migration status, attempting to apply...');
 
-    const result = spawnSync('supabase', ['migration', 'up'], {
+    const result = spawnSync('supabase', ['migration', 'up', '--local'], {
       stdio: 'inherit',
-      shell: true,
     });
 
     if (result.status === 0) {
@@ -167,7 +230,6 @@ async function startSupabase() {
   // Try normal start first
   let result = spawnSync('supabase', ['start'], {
     stdio: 'inherit',
-    shell: true,
   });
 
   if (result.status === 0) {
@@ -179,7 +241,6 @@ async function startSupabase() {
   // Try without analytics (logflare often causes health check issues)
   result = spawnSync('supabase', ['start', '--exclude', 'logflare'], {
     stdio: 'inherit',
-    shell: true,
   });
 
   if (result.status === 0) {
@@ -190,7 +251,6 @@ async function startSupabase() {
   // Try ignoring health checks
   result = spawnSync('supabase', ['start', '--ignore-health-check'], {
     stdio: 'inherit',
-    shell: true,
   });
 
   if (result.status === 0) {

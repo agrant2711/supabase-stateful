@@ -8,6 +8,7 @@
  */
 
 import { execSync, spawnSync } from 'child_process';
+import { readFileSync } from 'fs';
 import { getConfig } from './config.js';
 
 /**
@@ -81,7 +82,54 @@ export function shellCapture(cmd) {
 }
 
 /**
- * Check if Supabase containers are running
+ * The configured container name, read SYNCHRONOUSLY.
+ *
+ * `getConfig()` is async and this cannot be. `isRunning()` is called as a bare
+ * `if (isRunning())` in five places, two of them NEGATED (`stop.js`,
+ * `sync.js`). An async version returns a Promise, which is always truthy, so a
+ * single missed `await` would invert those guards — `stop` would decide nothing
+ * was running and refuse to stop it. Reading the file synchronously keeps the
+ * signature and every call site untouched.
+ *
+ * Returns null when there is no config, so a project that has never run `init`
+ * keeps the old behaviour instead of throwing.
+ */
+function configuredContainerName() {
+  try {
+    const parsed = JSON.parse(readFileSync('.supabase-stateful.json', 'utf8'));
+    return typeof parsed.containerName === 'string' && parsed.containerName
+      ? parsed.containerName
+      : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Check if THIS PROJECT'S Supabase containers are running.
+ *
+ * Matches the container named in `.supabase-stateful.json`, not the bare
+ * `supabase_db_` prefix.
+ *
+ * ## The prefix check was a bug, and a silent one
+ *
+ * Anyone with two Supabase projects on one machine — which is every consultant
+ * and most teams — has a second `supabase_db_<other>` in `docker ps`. The prefix
+ * matched it, so `isRunning()` answered a question about the WRONG project.
+ *
+ * `start()` then took its "already running" branch and skipped both
+ * `startSupabase()` and, far worse, `restoreSavedState()`. It went on to apply
+ * migrations against a port with nothing behind it, failed to connect, and
+ * printed "Ready for development!" anyway. The user is told their stateful
+ * database is up when it was never started and their saved state — the entire
+ * point of this package — was never restored.
+ *
+ * `stop.js` and `sync.js` were wrong in the same way, in the opposite
+ * direction: both guard on `!isRunning()`, so they would act on a project whose
+ * container is not there.
+ *
+ * The config file next to this code already names the right container. It
+ * simply was not consulted.
  */
 export function isRunning() {
   try {
@@ -89,7 +137,16 @@ export function isRunning() {
       encoding: 'utf8',
       stdio: ['pipe', 'pipe', 'pipe'], // Suppress stderr (Docker not running errors)
     });
-    return output.includes('supabase_db_');
+
+    const container = configuredContainerName();
+    // No config (pre-`init`): fall back to the old prefix behaviour rather than
+    // throwing. Still wrong in the two-project case, but no worse than before.
+    if (!container) return output.includes('supabase_db_');
+
+    // Exact line match. `--format "{{.Names}}"` prints one name per line, so a
+    // substring test would also match a container whose name merely CONTAINS
+    // ours — `supabase_db_app` matching `supabase_db_app_staging`.
+    return output.split('\n').some((name) => name.trim() === container);
   } catch {
     return false;
   }
