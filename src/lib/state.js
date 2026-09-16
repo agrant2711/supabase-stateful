@@ -9,7 +9,10 @@
  */
 
 import fs from 'fs/promises';
-import { execSync } from 'child_process';
+import { createWriteStream } from 'fs';
+import { execSync, spawn } from 'child_process';
+import { createInterface } from 'readline';
+import { once } from 'events';
 import { getConfig, fileExists } from './config.js';
 import { log } from '../utils/log.js';
 
@@ -64,21 +67,23 @@ export async function saveState() {
 
   // Run pg_dump with all table flags
   // Include schema (CREATE TABLE) + data so migrations can run ON TOP of existing data
-  const rawSql = execSync(
-    `docker exec ${container} pg_dump -U postgres -d postgres --inserts ${tableFlags}`,
-    { encoding: 'utf8', maxBuffer: 50 * 1024 * 1024 }
-  );
-
-  // Add ON CONFLICT DO NOTHING to all INSERT statements
-  // This makes restoration idempotent - existing rows are skipped
-  const safeSql = rawSql.replace(
-    /^(INSERT INTO [^;]+);$/gm,
-    '$1\nON CONFLICT DO NOTHING;'
-  );
-
-  // Wrap with header and footer
+  //
+  // STREAMED to disk, never buffered into a string.
+  //
+  // This used to be `execSync(..., { maxBuffer: 50MB })`, which is a cliff
+  // rather than a limit: a project's dump only ever grows, and the day it
+  // passes the ceiling the save fails with `ENOBUFS` — after the tool has
+  // already told the user it was saving. The state file is the entire point of
+  // this package, so the failure lands exactly where it can do most harm, and
+  // raising the number just moves the cliff a few months out.
+  //
+  // Streaming has no ceiling. The `ON CONFLICT DO NOTHING` rewrite that used to
+  // run as a regex over the whole dump now runs per line as it flows past,
+  // which is the same transformation in constant memory: `pg_dump --inserts`
+  // emits one INSERT per line, so a line is the unit the old pattern matched
+  // anyway (it was anchored `^…;$` with the `m` flag).
   const timestamp = new Date().toISOString();
-  const sql = `-- =============================================================================
+  const header = `-- =============================================================================
 -- Local Development State Snapshot
 -- =============================================================================
 -- Generated: ${timestamp}
@@ -96,8 +101,9 @@ export async function saveState() {
 -- Disable foreign key checks temporarily
 SET session_replication_role = replica;
 
-${safeSql}
+`;
 
+  const footer = `
 -- Re-enable foreign key checks
 SET session_replication_role = DEFAULT;
 
@@ -115,7 +121,61 @@ BEGIN
 END $$;
 `;
 
-  await fs.writeFile(config.stateFile, sql);
+  // WRITE TO A TEMPORARY FILE, then rename.
+  //
+  // `rename` is atomic within a filesystem, so a crash mid-dump leaves the
+  // previous state file untouched rather than half-written. Without it a
+  // failure partway through would destroy the very thing being backed up —
+  // and this function's whole job is to not lose data.
+  const tempFile = `${config.stateFile}.writing`;
+  const out = createWriteStream(tempFile);
+
+  const dump = spawn(
+    'docker',
+    ['exec', container, 'pg_dump', '-U', 'postgres', '-d', 'postgres', '--inserts',
+     ...tableFlags.split(' ').filter(Boolean)],
+    { stdio: ['ignore', 'pipe', 'pipe'] },
+  );
+
+  // Kept so a failure can say WHY rather than just exiting non-zero.
+  let stderr = '';
+  dump.stderr.on('data', (chunk) => { stderr += chunk.toString(); });
+
+  const write = (chunk) => {
+    // Respect backpressure: `write` returning false means the buffer is full,
+    // and ignoring it is how a stream quietly grows into the memory this
+    // change exists to stop using.
+    if (!out.write(chunk)) return once(out, 'drain');
+    return null;
+  };
+
+  await write(header);
+
+  const lines = createInterface({ input: dump.stdout, crlfDelay: Infinity });
+  for await (const line of lines) {
+    // The same rewrite as before, one line at a time. Makes a restore
+    // idempotent: an existing row is skipped rather than raising a duplicate
+    // key and aborting the whole restore.
+    const rewritten = /^INSERT INTO .*;$/.test(line)
+      ? `${line.slice(0, -1)}\nON CONFLICT DO NOTHING;`
+      : line;
+    const pending = write(`${rewritten}\n`);
+    if (pending) await pending;
+  }
+
+  await write(footer);
+  out.end();
+  await once(out, 'finish');
+
+  const [code] = await once(dump, 'close');
+  if (code !== 0) {
+    // Leave the previous state file alone — a failed dump must not replace a
+    // good backup with a partial one.
+    await fs.unlink(tempFile).catch(() => {});
+    throw new Error(`pg_dump exited with ${code}${stderr ? `: ${stderr.trim()}` : ''}`);
+  }
+
+  await fs.rename(tempFile, config.stateFile);
 }
 
 /**
