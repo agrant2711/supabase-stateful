@@ -162,16 +162,33 @@ export async function getProjectName() {
 }
 
 /**
- * Get docker logs for the DB container (last N lines)
- * Works even when the container has exited (crashed)
+ * Get docker logs for THIS PROJECT'S DB container (last N lines).
+ * Works even when the container has exited (crashed).
+ *
+ * Same bug as `isRunning()` had, and a more dangerous one: the bare
+ * `supabase_db_` filter returned EVERY project's container and this took the
+ * first line of that list. With two projects on one machine, which one you got
+ * was down to docker's ordering.
+ *
+ * Both callers feed the output to `detectVersionMismatch()` — `start.js` on a
+ * failed start, and `upgrade.js`. A PG version mismatch found in ANOTHER
+ * project's logs would offer to "upgrade" this project, and that path removes
+ * the data volume. Reading the wrong container here risks the wrong data.
  */
 export function getDbContainerLogs(tailLines = 50) {
   try {
+    const configured = configuredContainerName();
     const containers = execSync(
       'docker ps -a --format "{{.Names}}" --filter "name=supabase_db_"',
       { encoding: 'utf8', stdio: ['pipe', 'pipe', 'pipe'] }
     );
-    const containerName = containers.trim().split('\n')[0];
+    const names = containers.trim().split('\n').map((n) => n.trim()).filter(Boolean);
+
+    // Exact match on the configured name. No config (pre-`init`): fall back to
+    // the first container, as before — no worse than the old behaviour.
+    const containerName = configured
+      ? names.find((name) => name === configured)
+      : names[0];
     if (!containerName) return '';
 
     return execSync(
