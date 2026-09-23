@@ -160,6 +160,83 @@ export function countPendingMigrations(output) {
 }
 
 /**
+ * Does this `migration up` failure mean "a pending migration sorts before the
+ * last one already applied"?
+ *
+ * The CLI refuses that case rather than guessing, and says so:
+ *
+ *     Found local migration files to be inserted before the last migration on
+ *     remote database.
+ *     Rerun the command with --include-all flag to apply these migrations:
+ *
+ * That refusal is right for a REMOTE database, where replaying history out of
+ * order can land on a different schema than running it in order would have. It
+ * is the wrong default for a LOCAL one, where the situation is routine and
+ * benign: switching branches or rebasing back-dates a migration relative to
+ * what this database already applied, and the developer is then stuck behind a
+ * flag they must rediscover every time.
+ *
+ * Matched on the CLI's own wording rather than on the exit code, because a
+ * non-zero exit is ALSO what a genuinely broken migration produces — SQL that
+ * throws must keep failing loudly and must never be retried with a wider flag.
+ * Both sentences are required: the first names the condition, the second
+ * confirms the CLI itself considers --include-all the remedy.
+ *
+ * @param {string} output Combined stdout+stderr from a failed `migration up`.
+ * @returns {boolean} True when retrying with --include-all is the right move.
+ */
+export function isOutOfOrderRefusal(output) {
+  const text = output ?? '';
+  return (
+    text.includes('to be inserted before the last migration') &&
+    text.includes('--include-all')
+  );
+}
+
+/**
+ * Run `supabase migration up --local`, retrying once with `--include-all` if
+ * the only thing wrong was migration ORDER.
+ *
+ * `--local` is not optional and is passed on both attempts. The pending list is
+ * read with `--local`, so without it here the tool would decide what is pending
+ * by looking at the local database and then apply it to whatever `migration up`
+ * defaults to — the LINKED project, when one is configured. This command exists
+ * to manage a local stack; it must never reach a remote database. That pinning
+ * is also what makes the retry safe: `--include-all` is a bad idea against
+ * production precisely because history there is shared and unrepeatable, and
+ * neither is true of a disposable local database.
+ *
+ * Output is captured rather than inherited so the refusal can be recognised,
+ * then printed either way — a developer watching a migration run must still see
+ * exactly what the CLI said, including on the retry.
+ *
+ * @returns {boolean} True when migrations ended up applied.
+ */
+function runMigrationUp() {
+  const attempt = (args) => {
+    const result = spawnSync('supabase', ['migration', 'up', '--local', ...args], {
+      encoding: 'utf8',
+    });
+    const output = `${result.stdout ?? ''}${result.stderr ?? ''}`;
+    if (output.trim()) process.stdout.write(output.endsWith('\n') ? output : `${output}\n`);
+    return { ok: result.status === 0, output };
+  };
+
+  const first = attempt([]);
+  if (first.ok) return true;
+
+  if (!isOutOfOrderRefusal(first.output)) return false;
+
+  // Say why the flag is being added. Silently widening what a migration command
+  // applies is how a tool loses the developer's trust the first time something
+  // unexpected lands in their database.
+  log.info('A pending migration sorts before one already applied (branch switch or rebase).');
+  log.info('Retrying with --include-all, which is safe against a local database...');
+
+  return attempt(['--include-all']).ok;
+}
+
+/**
  * Apply pending migrations ON TOP of existing data
  * Uses `supabase migration up` instead of `db reset` to preserve data
  */
@@ -186,19 +263,7 @@ async function applyMigrations() {
       log.info(`Found ${pendingCount} pending migration(s)`);
       log.info('Applying migrations on top of existing data...');
 
-      // Use `migration up` instead of `db reset` - this applies migrations WITHOUT wiping data
-      //
-      // `--local` MATCHES THE CHECK ABOVE, and must. The list is read with
-      // `--local`, so without it here the tool decides what is pending by
-      // looking at the local database and then applies it to whatever
-      // `migration up` defaults to — the LINKED project when one is configured.
-      // This command exists to manage a local stack; it must never reach a
-      // remote database.
-      const result = spawnSync('supabase', ['migration', 'up', '--local'], {
-        stdio: 'inherit',
-      });
-
-      if (result.status !== 0) {
+      if (!runMigrationUp()) {
         log.error('Migration failed');
         process.exit(1);
       }
@@ -211,11 +276,7 @@ async function applyMigrations() {
     // Migration check failed, try applying anyway
     log.dim('Could not check migration status, attempting to apply...');
 
-    const result = spawnSync('supabase', ['migration', 'up', '--local'], {
-      stdio: 'inherit',
-    });
-
-    if (result.status === 0) {
+    if (runMigrationUp()) {
       log.success('Migrations applied');
     }
   }
